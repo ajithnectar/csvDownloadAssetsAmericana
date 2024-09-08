@@ -39,7 +39,7 @@ public class FileDownloadServiceImpl implements FileDownloadService {
     private RestTemplate restTemplate;
 
     private static final String GRAPHQL_URL = "https://americana.nectarit.com:444/api/graphql";
-    private static final String TOKEN = "82bd5653-59ac-39e1-8dc8-b51003630da4";
+    private static final String TOKEN = "251ff932-a736-3a39-89c7-a0c429da9350";
 
     // Method to fetch asset list from GraphQL API
     public JsonNode fetchAssetList() throws IOException {
@@ -105,47 +105,7 @@ public class FileDownloadServiceImpl implements FileDownloadService {
         return objectMapper.readTree(response.getBody()).path("data").path("getAssetList").path("assets");
     }
 
-    // Method to generate CSV from asset list
-    public byte[] generateCsv(JsonNode assetsNode) throws Exception {
-        ByteArrayOutputStream byteArrayOutputStream = new ByteArrayOutputStream();
-        OutputStreamWriter writer = new OutputStreamWriter(byteArrayOutputStream, StandardCharsets.UTF_8);
-
-        DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
-        ZoneId targetZone = ZoneId.of("Asia/Kolkata");
-        
-        // Write CSV header
-        writer.write("Category,Client Domain,Client Name,Communication Status,Created On,Critical Alarm,Data Time,Display Name,Document Expire,Domain,ID,Identifier,Location,Make,Model,Name,Operation Status,Serial Number\n");
-
-        // Write CSV rows
-        for (JsonNode asset : assetsNode) {
-            writer.write(asset.path("category").asText() + ",");
-            writer.write(asset.path("clientDomain").asText() + ",");
-            writer.write(asset.path("clientName").asText() + ",");
-            writer.write(asset.path("communicationStatus").asText() + ",");
-            String createdOn = convertToTimezone(asset.path("createdOn").asText(), targetZone, formatter);
-            writer.write(createdOn + ",");
-            writer.write(asset.path("criticalAlarm").asText() + ",");
-            String dataTime = convertToTimezone(asset.path("dataTime").asText(), targetZone, formatter);
-            writer.write(dataTime + ",");
-            writer.write(asset.path("displayName").asText() + ",");
-            writer.write(asset.path("documentExpire").asText() + ",");
-            writer.write(asset.path("domain").asText() + ",");
-            writer.write(asset.path("id").asText() + ",");
-            writer.write(asset.path("identifier").asText() + ",");
-            writer.write(asset.path("location").asText() + ",");
-            writer.write(asset.path("make").asText() + ",");
-            writer.write(asset.path("model").asText() + ",");
-            writer.write(asset.path("name").asText() + ",");
-            writer.write(asset.path("operationStatus").asText() + ",");
-            writer.write(asset.path("serialNumber").asText() + "\n");
-        }
-
-        writer.flush();
-        writer.close();
-
-        return byteArrayOutputStream.toByteArray();
-    }
-    
+   
     private String convertToTimezone(String dateTimeStr, ZoneId targetZone, DateTimeFormatter formatter) {
         long timestamp = Long.parseLong(dateTimeStr);
         Instant instant = Instant.ofEpochMilli(timestamp);
