@@ -53,24 +53,12 @@ public class AssetListController {
             Files.createDirectories(Paths.get(folderPath));
 
             for (var asset : assets) {
-                String assetId = asset.get("displayName").asText();  // Use a unique identifier for file names
+                String assetId = asset.get("displayName").asText();
                 var assetHistory = assetListService.fetchAssetHistoryList(asset);
-                byte[] csvData = assetListService.generateForEachAssetsCsv(asset, assetHistory);
-                
-                // Create a file with a unique name
-                String fileName = assetId + "_DataHistory.csv";
-                File csvFile = new File(folderPath, fileName);
+                assetListService.generateForEachAssetsCsv(asset, assetHistory,folderPath);
 
-                // Write the byte array data to the file
-                try (FileOutputStream fos = new FileOutputStream(csvFile)) {
-                    fos.write(csvData);
-                    csvFiles.add(csvFile);
-                } catch (IOException e) {
-                    return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body("Error writing file: " + e.getMessage());
-                }
             }
 
-            // Return a success message with folder path
             return ResponseEntity.ok("CSV files created successfully in folder: " + folderPath);
 
         } catch (Exception e) {

@@ -1,10 +1,13 @@
 package com.ajith.assetCSVdownload.serviceImpl;
 
 import java.io.ByteArrayOutputStream;
+import java.io.File;
+import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.OutputStreamWriter;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
+import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.time.ZonedDateTime;
 import java.time.format.DateTimeFormatter;
@@ -12,8 +15,6 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
-import java.util.LinkedHashMap;
-import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -38,7 +39,7 @@ public class FileDownloadServiceImpl implements FileDownloadService {
     private RestTemplate restTemplate;
 
     private static final String GRAPHQL_URL = "https://americana.nectarit.com:444/api/graphql";
-    private static final String TOKEN = "7d7fa7b4-cc80-3bea-8476-6113836cfb8c";
+    private static final String TOKEN = "82bd5653-59ac-39e1-8dc8-b51003630da4";
 
     // Method to fetch asset list from GraphQL API
     public JsonNode fetchAssetList() throws IOException {
@@ -53,6 +54,7 @@ public class FileDownloadServiceImpl implements FileDownloadService {
                 + "      criticalAlarm\r\n"
                 + "      dataTime\r\n"
                 + "      displayName\r\n"
+                + "		 underMaintenance\r\n"
                 + "      documentExpire\r\n"
                 + "      documentExpiryTypes\r\n"
                 + "      domain\r\n"
@@ -67,6 +69,7 @@ public class FileDownloadServiceImpl implements FileDownloadService {
                 + "      name\r\n"
                 + "      operationStatus\r\n"
                 + "      serialNumber\r\n"
+                + "		 status\r\n"
                 + "    }\r\n"
                 + "    totalAssetsCount\r\n"
                 + "  }\r\n"
@@ -230,65 +233,139 @@ public class FileDownloadServiceImpl implements FileDownloadService {
 	}
 
 	@Override
-	public byte[] generateForEachAssetsCsv(JsonNode asset, JsonNode assetHistory) throws IOException {
-	    ByteArrayOutputStream byteArrayOutputStream = new ByteArrayOutputStream();
-	    try (OutputStreamWriter writer = new OutputStreamWriter(byteArrayOutputStream, StandardCharsets.UTF_8)) {
-	        DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
-	        ZoneId targetZone = ZoneId.of("Asia/Kolkata");
+	public void generateForEachAssetsCsv(JsonNode asset, JsonNode assetHistory, String baseFolderPath) throws IOException {
+	    DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
+	    ZoneId targetZone = ZoneId.of("Asia/Kolkata");
 
-	        // Collect all unique point names for headers
-	        Set<String> pointNames = new LinkedHashSet<>();
-	        Map<String, Map<String, String>> dataMap = new LinkedHashMap<>();
+	    String assetId = asset.path("id").asText();
+	    String assetFolderPath = baseFolderPath + File.separator + assetId;
 
-	        if (assetHistory.isArray() && assetHistory.size() > 0) {
-	            JsonNode firstAssetHistory = assetHistory.get(0);
-	            JsonNode pointArray = firstAssetHistory.path("pointData");
+	    File assetFolder = new File(assetFolderPath);
+	    if (!assetFolder.exists()) {
+	        assetFolder.mkdirs();
+	    }
+
+	    Map<String, Map<String, Map<String, String>>> monthlyDataMap = new HashMap<>();
+	    Set<String> pointNames = new HashSet<>();
+	    List<Map<String, String>> pointInfoList = new ArrayList<>();
+
+	    // Extract point details from the asset's "points" array instead of the history
+	    JsonNode pointsArray = asset.path("points");
+
+	    if (pointsArray.isArray() && pointsArray.size() > 0) {
+	        for (JsonNode pointElement : pointsArray) {
+	            String pointName = pointElement.path("pointName").asText();
+	            pointNames.add(pointName);
+
+	            // Extract point details including unitSymbol
+	            String dataType = pointElement.path("dataType").asText();
+	            String unit = pointElement.path("unit").asText();
+	            String unitSymbol = pointElement.path("unitSymbol").asText();
+
+	            Map<String, String> pointInfo = new HashMap<>();
+	            pointInfo.put("pointName", pointName);
+	            pointInfo.put("dataType", dataType);
+	            pointInfo.put("unit", unit);
+	            pointInfo.put("unitSymbol", unitSymbol);
+	            pointInfoList.add(pointInfo);
+	        }
+	    }
+
+	    // Process assetHistory to populate monthlyDataMap (remains unchanged)
+	    if (assetHistory.isArray() && assetHistory.size() > 0) {
+	        for (JsonNode assetHistoryElement : assetHistory) {
+	            JsonNode pointArray = assetHistoryElement.path("pointData");
 
 	            if (pointArray.isArray() && pointArray.size() > 0) {
 	                for (JsonNode pointArrayElement : pointArray) {
 	                    String pointName = pointArrayElement.path("displayName").asText();
-	                    pointNames.add(pointName);
-
 	                    JsonNode valueArray = pointArrayElement.path("values");
 	                    if (valueArray.isArray() && valueArray.size() > 0) {
 	                        for (JsonNode value : valueArray) {
 	                            String dataTime = convertToTimezone(value.path("dataTime").asText(), targetZone, formatter);
+	                            LocalDateTime localDateTime = LocalDateTime.parse(dataTime, formatter);
+
+	                            String monthYear = localDateTime.getYear() + "-" + String.format("%02d", localDateTime.getMonthValue());
 	                            String data = value.path("data").asText();
 
-	                            // Initialize map for this timestamp if not already present
-	                            dataMap.computeIfAbsent(dataTime, k -> new HashMap<>()).put(pointName, data);
+	                            monthlyDataMap
+	                                .computeIfAbsent(monthYear, k -> new HashMap<>())
+	                                .computeIfAbsent(dataTime, k -> new HashMap<>())
+	                                .put(pointName, data);
 	                        }
 	                    }
 	                }
 	            }
 	        }
-
-	        // Write CSV header
-	        writer.write("DateTime");
-	        for (String pointName : pointNames) {
-	            writer.write("," + pointName);
-	        }
-	        writer.write("\n");
-
-	        // Write data rows
-	        for (Map.Entry<String, Map<String, String>> entry : dataMap.entrySet()) {
-	            String dataTime = entry.getKey();
-	            Map<String, String> values = entry.getValue();
-
-	            writer.write(dataTime);
-	            for (String pointName : pointNames) {
-	                writer.write("," + values.getOrDefault(pointName, ""));
-	            }
-	            writer.write("\n");
-	        }
-
-	        writer.flush();
-	    } catch (IOException e) {
-	        // Handle potential IOExceptions
-	        throw new IOException("Error writing CSV data", e);
 	    }
 
-	    return byteArrayOutputStream.toByteArray();
+	    // For each month, create a CSV file and write data (same as before)
+	    for (Map.Entry<String, Map<String, Map<String, String>>> monthlyEntry : monthlyDataMap.entrySet()) {
+	        String monthYear = monthlyEntry.getKey();
+	        Map<String, Map<String, String>> dataMap = monthlyEntry.getValue();
+
+	        String csvFilePath = assetFolderPath + File.separator + "AssetHistory_" + monthYear + ".csv";
+	        try (OutputStreamWriter writer = new OutputStreamWriter(new FileOutputStream(csvFilePath), StandardCharsets.UTF_8)) {
+	            writer.write("DateTime");
+	            for (String pointName : pointNames) {
+	                writer.write("," + pointName);
+	            }
+	            writer.write("\n");
+
+	            for (Map.Entry<String, Map<String, String>> entry : dataMap.entrySet()) {
+	                String dataTime = entry.getKey();
+	                Map<String, String> values = entry.getValue();
+
+	                writer.write(dataTime);
+	                for (String pointName : pointNames) {
+	                    writer.write("," + values.getOrDefault(pointName, ""));
+	                }
+	                writer.write("\n");
+	            }
+
+	            writer.flush();
+	        } catch (IOException e) {
+	            throw new IOException("Error writing CSV for " + monthYear, e);
+	        }
+	    }
+
+	    // Create a second CSV file to store point info (including unitSymbol)
+	    String pointInfoCsvFilePath = assetFolderPath + File.separator + "PointInfo.csv";
+	    try (OutputStreamWriter pointInfoWriter = new OutputStreamWriter(new FileOutputStream(pointInfoCsvFilePath), StandardCharsets.UTF_8)) {
+	        // Write CSV header for point info
+	        pointInfoWriter.write("PointName,DataType,Unit,UnitSymbol\n");
+
+	        // Write data rows for point info
+	        for (Map<String, String> pointInfo : pointInfoList) {
+	            pointInfoWriter.write(pointInfo.get("pointName") + ",");
+	            pointInfoWriter.write(pointInfo.get("dataType") + ",");
+	            pointInfoWriter.write(pointInfo.get("unit") + ",");
+	            pointInfoWriter.write(pointInfo.get("unitSymbol") + "\n");
+	        }
+
+	        pointInfoWriter.flush();
+	    } catch (IOException e) {
+	        throw new IOException("Error writing PointInfo CSV", e);
+	    }
+
+	    // Create the third CSV file for asset details (same as before)
+	    String assetDetailsCsvFilePath = assetFolderPath + File.separator + "AssetDetails.csv";
+	    try (OutputStreamWriter assetDetailsWriter = new OutputStreamWriter(new FileOutputStream(assetDetailsCsvFilePath), StandardCharsets.UTF_8)) {
+	        assetDetailsWriter.write("DisplayName,TypeName,CreatedOn,OwnerName,Model,Make,Status,UnderMaintenance\n");
+
+	        assetDetailsWriter.write(asset.path("displayName").asText() + ",");
+	        assetDetailsWriter.write(asset.path("typeName").asText() + ",");
+	        assetDetailsWriter.write(convertToTimezone(asset.path("createdOn").asText(), targetZone, formatter) + ",");
+	        assetDetailsWriter.write(asset.path("clientName").asText() + ",");
+	        assetDetailsWriter.write(asset.path("model").asText() + ",");
+	        assetDetailsWriter.write(asset.path("make").asText() + ",");
+	        assetDetailsWriter.write(asset.path("status").asText() + ",");
+	        assetDetailsWriter.write(asset.path("underMaintenance").asText() + "\n");
+
+	        assetDetailsWriter.flush();
+	    } catch (IOException e) {
+	        throw new IOException("Error writing AssetDetails CSV", e);
+	    }
 	}
-	
+
 }
